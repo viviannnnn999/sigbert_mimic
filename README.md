@@ -14,6 +14,14 @@ Predicting patient outcomes in the ICU requires handling both static data and ir
 - Anaconda or Miniconda
 - Python 3.12+
 
+<<<<<<< HEAD
+=======
+Add math with
+$$
+f(x) = \int_0^{x^2} s(t) dt
+$$
+
+>>>>>>> 8de1737 (Linking local folder to github)
 ### Setup
 Clone this repository and install the dependencies from the `requirements.txt` file:
 
@@ -21,4 +29,8 @@ Clone this repository and install the dependencies from the `requirements.txt` f
 git clone [https://github.com/viviannnnn999/sigbert_mimic.git](https://github.com/viviannnnn999/sigbert_mimic.git)
 cd sigbert_mimic
 pip install -r requirements.txt
+<<<<<<< HEAD
 ```
+=======
+```
+>>>>>>> 8de1737 (Linking local folder to github)
