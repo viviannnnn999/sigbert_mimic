@@ -15,6 +15,7 @@ Predicting patient outcomes in the ICU requires handling both static data and ir
 - Python 3.12+
 
 Add math with
+
 $$
 f(x) = \int_0^{x^2} s(t) dt
 $$
