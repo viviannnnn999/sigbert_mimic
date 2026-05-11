@@ -14,12 +14,6 @@ Predicting patient outcomes in the ICU requires handling both static data and ir
 - Anaconda or Miniconda
 - Python 3.12+
 
-Add math with
-
-$$
-f(x) = \int_0^{x^2} s(t) dt
-$$
-
 ### Setup
 Clone this repository and install the dependencies from the `requirements.txt` file:
 
