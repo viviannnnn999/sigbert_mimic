@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 ########################################################################################
 #                                                                                      #
 #                                                                                      #
@@ -419,7 +418,7 @@ def arora_methods(
     sentence_embeddings_list = [np.squeeze(embedding) for embedding in sentence_embeddings_list]
     df['embeddings'] = sentence_embeddings_list
 
-=======
+
 ########################################################################################
 #                                                                                      #
 #                                                                                      #
@@ -840,5 +839,4 @@ def arora_methods(
     sentence_embeddings_list = [np.squeeze(embedding) for embedding in sentence_embeddings_list]
     df['embeddings'] = sentence_embeddings_list
 
->>>>>>> 8de1737 (Linking local folder to github)
     return df
