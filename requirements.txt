@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Data Handling & Math
 numpy==1.26.4
 pandas==2.2.2
@@ -17,7 +16,7 @@ scikit-learn==1.7.2
 # Utilities
 tqdm==4.66.5
 matplotlib==3.9.2
-=======
+
 # Data Handling & Math
 numpy==1.26.4
 pandas==2.2.2
@@ -36,5 +35,4 @@ scikit-learn==1.7.2
 # Utilities
 tqdm==4.66.5
 matplotlib==3.9.2
->>>>>>> 8de1737 (Linking local folder to github)
 seaborn==0.13.2
