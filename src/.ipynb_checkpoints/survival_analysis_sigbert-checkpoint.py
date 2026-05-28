@@ -43,24 +43,21 @@ def preprocess_skglm(Xt, y, print_infos=False):
     """
     
     # Convert Xt to NumPy array safely
-    if hasattr(Xt, "to_numpy"):   # situation 1: Xt is pandas DataFrame or Series
+    if hasattr(Xt, "to_numpy"):
         X = Xt.to_numpy()
-    elif hasattr(Xt, "toarray"):  # situation 2: Xt is a scipy sparse matrix(稀疏矩陣)
+    elif hasattr(Xt, "toarray"):  # e.g., scipy sparse matrix
         X = Xt.toarray()
-    elif isinstance(Xt, np.ndarray): #situation 3: Xt is already a numpy array
+    elif isinstance(Xt, np.ndarray):
         X = Xt
-    else: # all the which are not either the three situation 
+    else:
         raise TypeError("Xt must be a pandas DataFrame, a scipy sparse matrix, or a NumPy array.")
 
     # Convert y structured array to (event, time) 2D float array
-    event = y['event'].astype(float) # whether the event occurs
-                                     # If there are two types in anarray (e.g. int & float), 
-                                     # numpy upgrades all into float.In order not to confuse dtype, we convert all into float.
-    time = y['time']  # here it's float, not date.
+    event = y['event'].astype(float)
+    time = y['time']
     y = np.column_stack((event, time))
 
     # Ensure contiguous memory layout
-    # np.ascontiguousarray() : Convert an array into a C-contiguous NumPy array to ensure that the data is arranged continuously in memory.
     X = np.ascontiguousarray(X)
     y = np.ascontiguousarray(y)
 
@@ -89,7 +86,6 @@ def skglm_risk(
         Target array with two columns: 'event' (1 if event occurred, 0 otherwise) and 'time' (duration).
     alpha : float
         Regularization strength for the L1 penalty.
-        The larger the value, the more coefficients are compressed to 0, resulting in a more sparse model.
     print_nonnuls : bool, default=True
         If True, print the number of nonzero coefficients in the fitted model.
 
@@ -100,24 +96,19 @@ def skglm_risk(
     """
     datafit = compiled_clone(Cox())
     penalty = compiled_clone(L1(alpha))
-    #compiled_clone(): skglm will use Numba/JIT to compile these objects into a faster version.
     datafit.initialize(X, y)
-    # Prepare the internal structure according to the data (X, y)
-    solver = ProxNewton(fit_intercept=False, max_iter=50) 
-    # ProxNewton(): a solver for skglm specifically designed to solve problems involving smooth loss + non-smooth regularization.
-    
-    w_sk = solver.solve(X, y, datafit, penalty)[0]  # [0] : take the first element, for the return is a tuple
+    solver = ProxNewton(fit_intercept=False, max_iter=50)
+    w_sk = solver.solve(X, y, datafit, penalty)[0]
 
     if print_nonnuls:
         print(f"Number of nonzero coefficients in solution: {(w_sk != 0).sum()} out of {len(w_sk)}.")
-        #(w_sk != 0).sum(): the number of zeros (ie. how many features are reserved)
-        #len(w_sk) : total number of features
+
     return -w_sk  # Note: minus sign is required for correct risk scoring
 
 
-    
 
-#Self-define CustomOneHotEncoder based on two categoeries in scikit-learn (BaseEstimator and TransformerMixin)
+
+
 class CustomOneHotEncoder(BaseEstimator, TransformerMixin):
     """
     Custom one-hot encoder inspired by scikit-survival's OneHotEncoder.
@@ -140,12 +131,9 @@ class CustomOneHotEncoder(BaseEstimator, TransformerMixin):
         Number of features seen during fit.
     feature_names_in_ : array-like
         Names of the input features seen during fit.
-    ----------
-    BaseEstimator: Make object behave like the estimator built into sklearn.
-    TransformerMixin: Transformer with fit() and transform(), plus automatically perform fit_transform()
     """
 
-    def __init__(self, *, allow_drop=True): # self: object itself.
+    def __init__(self, *, allow_drop=True):
         self.allow_drop = allow_drop
 
     def fit(self, X, y=None):
