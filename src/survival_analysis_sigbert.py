@@ -443,127 +443,62 @@ def c_index_skglm(
     return concordance_index(df_survival[var_time], -df_survival[var_risk], df_survival[var_event])
 
 
-
-    
 def preprocess_cox(
     df,
-    var_DEATH='DEATH_L',
-    date_death="date_death",
-    debut_etude="date_start",
-    fin_etude="date_end",
-    var_id="ID",
-    return_id=False,
-    var_known=None,
-    retire_duration_known=False,
-    compute_duree = False,
-    var_duree_OG = 'R'
+    var_death="delta_i",
+    var_duration="survival_time",
+    var_id="SUBJECT_ID",
+    return_id=False
 ):
-    """
-    Prepares the input DataFrame for Cox model training by computing event durations,
-    filtering invalid entries, and extracting signature-based features.
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Input DataFrame containing patient-level and time-series information.
-    var_DEATH : str, default='DEATH'
-        Name of the binary event column (1 = event occurred, 0 = censored).
-    date_death : str, default='date_death'
-        Name of the column containing the event (death) date.
-    debut_etude : str, default='date_start'
-        Column indicating the start date of follow-up for each patient.
-    fin_etude : str, default='date_end'
-        Column indicating the end date of follow-up (for censored patients).
-    var_id : str, default='ID'
-        Column identifying patients.
-    return_id : bool, default=False
-        If True, also returns the list of patient IDs retained after filtering.
-    var_known : str or None, optional
-        Name of the column indicating the known observation window (used to truncate duration).
-    retire_duration_known : bool, default=False
-        If True, subtracts 'duration_known' from 'duree' to focus on prediction beyond last known data.
-    compute_duree : bool, default=False
-        If True, compute duration in the study from first date to last known.
+    df = df.copy()
 
-    Returns
-    -------
-    df_filtered : pd.DataFrame
-        Filtered DataFrame with columns ['duree', var_DEATH, *signature_features].
-    features : list of str
-        Names of signature features used as input to the Cox model.
-    id_list : list of str, optional
-        List of patient IDs retained (only if return_id is True).
-    """
-
-    # Ensure datetime columns are parsed correctly
-    for col in [debut_etude, date_death, fin_etude]:
-        if col in df.columns and not pd.api.types.is_datetime64_any_dtype(df[col]):
-            print(f"Converting '{col}' to datetime format...")
-            df[col] = pd.to_datetime(df[col])
-
-    if compute_duree:
-        var_duree_name = 'duree'
-        # Compute duration (duree): from start to death if available, else to end of follow-up
-        df[var_duree_name] = np.where(
-            df[date_death].notna(),
-            (df[date_death] - df[debut_etude]).dt.days,
-            (df[fin_etude] - df[debut_etude]).dt.days
+    if var_death not in df.columns:
+        raise ValueError(
+            f"Column '{var_death}' not found. "
+            f"Available columns: {list(df.columns)}"
         )
-    else:
-        var_duree_name = var_duree_OG
 
-    # Optionally subtract the known observation window from duration
-    if retire_duration_known and var_known is not None and var_known in df.columns:
-        print("\n--- Duration Truncation Based on Known Observation Window ---")
-        n_patients_before = df[var_id].nunique()
-        mean_known_duration = df.groupby(var_id)[var_duree_name].max().mean()
-        print(f"Number of patients before duration cut: {n_patients_before}")
-        print(f"Mean duration in study per patient: {mean_known_duration:.2f} days")
+    if var_duration not in df.columns:
+        raise ValueError(
+            f"Column '{var_duration}' not found. "
+            f"Available columns: {list(df.columns)}"
+        )
 
-        if df.columns.duplicated().sum() > 0:
-            duplicated_cols = df.columns[df.columns.duplicated(keep='first')]
-            if var_known in duplicated_cols.values:
-                print(f"Warning: duplicated column '{var_known}' detected — removing duplicates.")
-                df = df.loc[:, ~df.columns.duplicated()]
+    if var_id not in df.columns:
+        raise ValueError(
+            f"Column '{var_id}' not found. "
+            f"Available columns: {list(df.columns)}"
+        )
 
-        df[var_duree_name] = df[var_duree_name] - df[var_known].values
-        df = df[df[var_duree_name] >= 0]
+    features = [c for c in df.columns if c.startswith("sig_")]
 
-        n_patients_after = df[var_id].nunique()
-        mean_pred_duration = df.groupby(var_id)[var_duree_name].max().mean()
-        print(f"Number of patients after duration cut: {n_patients_after}")
-        print(f"Mean predicted duration per patient: {mean_pred_duration:.2f} days")
+    if len(features) == 0:
+        raise ValueError(
+            "No signature features found."
+        )
 
-    # Identify signature features
-    features = [col for col in df.columns if col.startswith('sig_')]
+    df_clean = df.dropna(
+        subset=[var_id, var_duration, var_death] + features
+    )
 
-    # Drop rows with missing values in key columns
-    df_clean = df.dropna(subset=[var_duree_name, var_DEATH] + features)
+    df_clean = df_clean[
+        df_clean[var_duration] > 0
+    ].copy()
 
-    # Filter out negative durations
-    df_clean = df_clean[df_clean[var_duree_name] >= 0]
+    selected_cols = (
+        [var_id, var_duration, var_death]
+        + features
+    )
 
-    # Build final filtered DataFrame
-    cols = [var_id, var_duree_name, var_DEATH]
-    
-    # Keep original T_days column if present
-    if 'T_days' in df.columns:
-        cols.append('T_days')
-    
-    if var_known is not None and var_known in df.columns:
-        cols.append(var_known)
-    
-    cols += features
-    
-    df_filtered = df_clean[cols]
+    df_filtered = df_clean[selected_cols]
 
-    # Return outputs
-    id_list = df_clean[var_id].unique()
+    id_list = df_filtered[var_id].values
+
     if return_id:
         return df_filtered, features, id_list
-    else:
-        return df_filtered, features
-    
+
+    return df_filtered, features
     
     
     

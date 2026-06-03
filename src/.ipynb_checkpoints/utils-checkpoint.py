@@ -77,7 +77,7 @@ def print_dataset_statistics(df, var_id, var_death):
     print(f"Number of censored patients: {num_censored}")
 
 
-def plot_report_distribution_per_patient(df, var_id, export_path=None):
+def plot_report_distribution_per_patient(df_0, var_id, export_path=None):
     """
     Plots the distribution of the number of reports per patient.
 
@@ -88,8 +88,22 @@ def plot_report_distribution_per_patient(df, var_id, export_path=None):
     export_path : str or None, default=None
         If provided, saves the plot to this path as a PNG file.
     """
+    print("Step1 ok")
+    df = df_0.copy()
+
+    print("Step2 ok")
+    df.reset_index(drop=True, inplace=True)
+
+    print("Step3 ok")
+    # FIX 3: Sanitize SUBJECT_ID - clean whitespaces and drop NaN/corrupted identities
+    df[var_id] = df[var_id].astype(str).str.strip()
+    df = df[df[var_id].notna() & (df[var_id] != 'nan') & (df[var_id] != '')]
+
+    print("Step4 ok")
     report_counts = df[var_id].value_counts()
 
+    print("Step5 ok")
+    
     plt.figure(figsize=(10, 6))
     sns.histplot(report_counts, bins=20, kde=True, color='green')
 
@@ -102,7 +116,6 @@ def plot_report_distribution_per_patient(df, var_id, export_path=None):
         plt.savefig(export_path, dpi=300, bbox_inches='tight')
 
     plt.show()
-
 
 
 
@@ -908,11 +921,11 @@ def compute_survival_time(df: pd.DataFrame,
 
 def define_landmark_cohort(df: pd.DataFrame,
                            landmark_months: int,
-                           var_time: str = 'date_creation',
+                           var_time: str = 'note_time',
                            var_id: str = 'ID',
-                           var_start: str = 'date_start',
-                           var_end: str = 'date_end',
                            var_T: str = 'T_days',
+                           var_death: str = 'delta_i',
+                           var_since_start: str = 'time_since_first_note',
                            window_months: int = 6,
                            verbose: bool = True):
     """
@@ -925,7 +938,7 @@ def define_landmark_cohort(df: pd.DataFrame,
     """
 
     # Ensure datetime types
-    for col in [var_time, var_start, var_end]:
+    for col in [var_time]:
         df[col] = pd.to_datetime(df[col], errors='coerce')
 
     # Convert months to days
@@ -938,13 +951,10 @@ def define_landmark_cohort(df: pd.DataFrame,
     # Subset: keep only patients at risk
     df_sub = df[df[var_id].isin(patients_in_study)].copy()
 
-    # Compute days since start
-    df_sub['days_since_start'] = (df_sub[var_time] - df_sub[var_start]).dt.days
-
     # Apply time window [L-w, L]
     total_obs_before = len(df_sub)
-    df_L = df_sub[(df_sub['days_since_start'] >= (L_days - w_days)) &
-                  (df_sub['days_since_start'] <= L_days)].copy()
+    df_L = df_sub[(df_sub[var_since_start] >= (L_days - w_days)) &
+                  (df_sub[var_since_start] <= L_days)].copy()
     total_obs_after = len(df_L)
     obs_removed = total_obs_before - total_obs_after
     prop_removed = obs_removed / total_obs_before if total_obs_before > 0 else 0
@@ -953,12 +963,12 @@ def define_landmark_cohort(df: pd.DataFrame,
     # Compute gamma_i(L), but DO NOT MERGE into sequential dataframe
     # ---------------------------------------------------------------
     first_obs = (
-        df_L.groupby(var_id)['days_since_start']
+        df_L.groupby(var_id)[var_since_start]
         .min()
         .reset_index()
-        .rename(columns={'days_since_start': 'first_obs_days'})
+        .rename(columns={var_since_start: var_since_start})
     )
-    first_obs['gamma'] = ((L_days - first_obs['first_obs_days']) < w_days).astype(int)
+    first_obs['gamma'] = ((L_days - first_obs[var_since_start]) < w_days).astype(int)
 
     # Prepare gamma output: only ID and gamma
     df_gamma = first_obs[[var_id, 'gamma']].copy()
@@ -976,7 +986,7 @@ def define_landmark_cohort(df: pd.DataFrame,
     # ====================================================================
     df_L["DEATH_L"] = (
         (df_L[var_T] > L_days) &
-        (df_L["DEATH"] == 1)
+        (df_L[var_death] == 1)
     ).astype(int)
     # ====================================================================
 
@@ -996,6 +1006,7 @@ def define_landmark_cohort(df: pd.DataFrame,
         print(f"  → Landmark events computed: DEATH_L sum = {df_L['DEATH_L'].sum()}.")
 
     return df_L, patients_in_study, df_gamma
+
 
 
 

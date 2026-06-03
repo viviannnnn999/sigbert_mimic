@@ -9,8 +9,8 @@ from sklearn.preprocessing import StandardScaler
 
 def preprocess_time(
     df,
-    time_var = 'date_creation',  # Temporal variable (e.g., report date)
-    patient_id_col = 'ID'        # Patient identifier column
+    time_var = 'note_time',  # Temporal variable (e.g., report date)
+    patient_id_col = 'SUBJECT_ID'        # Patient identifier column
 ):
     """
     Normalize the temporal variable to the [0, 1] interval for each patient.
@@ -96,7 +96,7 @@ def calculate_signature(
 def preprocess_sign(
     df,
     retire_small= False,
-    patient_id_col= 'ID',
+    patient_id_col= 'SUBJECT_ID',
     return_id = False,
     verbose = True
 ):
@@ -149,7 +149,7 @@ def signature_extract(
     df_OG,
     order=2,
     var_temp="timestamp",
-    var_patient="ID",
+    var_patient="SUBJECT_ID",
     var_embd="embeddings",
     var_struct_list=None,
     interpolation_type='linear',
@@ -170,15 +170,11 @@ def signature_extract(
     # Detect survival columns if present
     # --------------------------------------------------
     survival_cols = []
-    if "DEATH" in df.columns:
-        survival_cols.append("DEATH")
-    if "DEATH_L" in df.columns:
-        survival_cols.append("DEATH_L")
-
-    if "T_days" in df.columns:
-        survival_cols.append("T_days")
-    if "R" in df.columns:
-        survival_cols.append("R")
+    if "delta_i" in df.columns:
+        survival_cols.append("delta_i")
+    
+    if "survival_time" in df.columns:
+        survival_cols.append("survival_time")
 
     # --------------------------------------------------
     # Expand embeddings if provided

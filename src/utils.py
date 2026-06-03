@@ -152,19 +152,206 @@ def convert_date_columns(data, verbose=True, date_format="%Y-%m-%d"):
 
 
 
+def convert_embedding_strings(
+    df,
+    var_embd="embeddings"
+):
+    """
+    Convert string representations of embeddings into NumPy arrays.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input dataframe.
+    var_embd : str, default="embeddings"
+        Name of the embedding column.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with embeddings stored as NumPy arrays.
+    """
+
+    df = df.copy()
+
+    df[var_embd] = df[var_embd].apply(
+        lambda x: np.fromstring(
+            x.strip("[]"),
+            sep=" "
+        )
+        if isinstance(x, str)
+        else np.asarray(x)
+    )
+
+    return df
+
+
+
+
+
+def plot_survival_time_distribution(
+    df,
+    patient_id_col="SUBJECT_ID",
+    event_col="delta_i",
+    duration_col="survival_time",
+    bins=50,
+    figsize=(10, 6),
+    alpha=0.6,
+    color_event="#B21D61",
+    color_censored="#1f77b4",
+    verbose=True
+):
+    """
+    Plot the distribution of survival times at the patient level.
+
+    Each patient contributes exactly one observation.
+    The first row of each patient is retained.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Longitudinal dataframe.
+    patient_id_col : str, default="SUBJECT_ID"
+        Patient identifier.
+    event_col : str, default="delta_i"
+        Event indicator (1=death, 0=censored).
+    duration_col : str, default="survival_time"
+        Survival duration in days.
+
+    Returns
+    -------
+    df_patient : pd.DataFrame
+        One-row-per-patient dataframe.
+    stats_deceased : pd.Series
+        Descriptive statistics for deceased patients.
+    stats_censored : pd.Series
+        Descriptive statistics for censored patients.
+    """
+
+    # --------------------------------------------------
+    # One row per patient
+    # --------------------------------------------------
+    df_patient = (
+        df.groupby(patient_id_col, as_index=False)
+          .first()
+    )
+
+    deceased = df_patient[df_patient[event_col] == 1]
+    censored = df_patient[df_patient[event_col] == 0]
+
+    # --------------------------------------------------
+    # Histogram
+    # --------------------------------------------------
+    plt.figure(figsize=figsize)
+
+    sns.histplot(
+        deceased[duration_col],
+        bins=bins,
+        color=color_event,
+        alpha=alpha,
+        label="Death"
+    )
+
+    sns.histplot(
+        censored[duration_col],
+        bins=bins,
+        color=color_censored,
+        alpha=alpha,
+        label="Censored"
+    )
+
+    plt.axvline(
+        deceased[duration_col].median(),
+        color=color_event,
+        linestyle="--",
+        linewidth=2,
+        label="Median (death)"
+    )
+
+    plt.axvline(
+        censored[duration_col].median(),
+        color=color_censored,
+        linestyle="--",
+        linewidth=2,
+        label="Median (censored)"
+    )
+
+    plt.title(
+        "Distribution of survival times",
+        fontsize=16
+    )
+
+    plt.xlabel(
+        "Survival time (days)",
+        fontsize=14
+    )
+
+    plt.ylabel(
+        "Number of patients",
+        fontsize=14
+    )
+
+    plt.legend()
+    plt.grid(
+        axis="y",
+        linestyle="--",
+        alpha=0.5
+    )
+
+    plt.show()
+
+    # --------------------------------------------------
+    # Statistics
+    # --------------------------------------------------
+    stats_deceased = deceased[duration_col].describe()
+    stats_censored = censored[duration_col].describe()
+
+    if verbose:
+
+        print(
+            f"Number of unique patients: "
+            f"{df_patient[patient_id_col].nunique()}"
+        )
+
+        print(
+            f"Number of deceased patients: "
+            f"{len(deceased)}"
+        )
+
+        print(
+            f"Number of censored patients: "
+            f"{len(censored)}"
+        )
+
+        print("\nDeceased patients")
+        print("-----------------")
+        print(stats_deceased)
+
+        print("\nCensored patients")
+        print("-----------------")
+        print(stats_censored)
+
+    return (
+        df_patient,
+        stats_deceased,
+        stats_censored
+    )
+
+
+
 
 
 def prep_import(
     df_longitudinal,
-    signature_order=3,
+    signature_order=2,
     use_log_signature=False,
     use_levy_area=False,
     print_progress=False,
-    patient_id_col="ID",
+    patient_id_col="SUBJECT_ID",
     embedding_col="embeddings",
-    event_col="DEATH",
-    duration_col="duration",
-    survival_time_col="time",
+    event_col="delta_i",
+    duration_col="survival_time",
+    survival_time_col="survival_time",
     survival_event_col="event",
     verbose=True
 ):
@@ -216,8 +403,6 @@ def prep_import(
         Names of signature features.
     nbr_signature_features : int
         Number of signature coefficients.
-    nbr_levy_features : int
-        Number of Lévy area features.
     patient_ids : np.ndarray
         Patient identifiers retained in the final dataset.
     df_study : pd.DataFrame
@@ -243,14 +428,12 @@ def prep_import(
     # --------------------------------------------------
     # Signature extraction
     # --------------------------------------------------
-    df_signature, nbr_signature_features, nbr_levy_features = (
+    df_signature, nbr_signature_features = (
         signature_extract(
             df_time_normalized,
             order=signature_order,
             var_patient=patient_id_col,
             var_embd=embedding_col,
-            use_log=use_log_signature,
-            use_mat_Levy=use_levy_area,
             verbose=verbose
         )
     )
@@ -272,12 +455,19 @@ def prep_import(
         print("*" * 30)
         print("Signature preprocessing completed.")
 
+
+    # df_signature = df_signature.rename(columns={"delta_i": "event"})
+    # df_signature = df_signature.rename(columns={"survival_time": "time"})
+    
     # --------------------------------------------------
     # Cox-compatible preprocessing
     # --------------------------------------------------
     df_signature_filtered, feature_names, patient_ids = (
         preprocess_cox(
             df_signature,
+            var_death=event_col,
+            var_duration=duration_col,
+            var_id=patient_id_col,
             return_id=True
         )
     )
@@ -304,132 +494,130 @@ def prep_import(
     # --------------------------------------------------
     # Final study dataframe
     # --------------------------------------------------
-    df_study = pd.DataFrame(
-        Xt,
-        columns=feature_names
-    )
+    df_study = pd.DataFrame(Xt,columns=feature_names)
 
-    df_study.insert(
-        0,
-        patient_id_col,
-        patient_ids
-    )
+    df_study.insert(0,patient_id_col,patient_ids)
 
-    df_study[survival_event_col] = (
-        y[survival_event_col]
-        .astype(bool)
-    )
+    df_study[survival_event_col] = y["event"].astype(bool)
+    df_study[survival_time_col] = y["time"].astype(float)
 
-    df_study[survival_time_col] = (
-        y[survival_time_col]
-        .astype(float)
-    )
 
     if print_progress:
-
-        print(
-            f"Final study dataframe shape: "
-            f"{df_study.shape}"
-        )
+        print(f"Final study dataframe shape: {df_study.shape}")
 
     return (
         Xt,
         y,
         feature_names,
         nbr_signature_features,
-        nbr_levy_features,
         patient_ids,
         df_study
     )
-    
+
+
+
+
+
+
 
 def make_train_test(
-    df_OG, 
-    var_id='ID', 
-    var_date='date_creation', 
-    min_date='1990-01-01', 
-    n_group=10, 
-    random_state=177, 
+    df_OG,
+    var_id="SUBJECT_ID",
+    var_date="note_time",
+    min_date="1990-01-01",
+    n_group=10,
+    random_state=177,
     size_test=0.5,
-    verbose=False
+    verbose=True
 ):
     """
-    Splits a DataFrame into a training set and multiple test sets without balancing for survival status.
+    Split a longitudinal dataset into one training set and several test sets.
+
+    Splitting is performed at the patient level to avoid information leakage.
+    All observations from a given patient remain in the same subset.
 
     Parameters
     ----------
     df_OG : pd.DataFrame
-        The full dataset containing patient-level data, including identifier and date columns.
-    var_id : str, default='ID'
-        Name of the column identifying each patient.
-    var_date : str, default='date_creation'
-        Name of the column containing the date of the medical report.
-    min_date : str, default='1990-01-01'
-        Minimum accepted date for filtering patient records.
+        Longitudinal dataframe.
+    var_id : str, default="SUBJECT_ID"
+        Patient identifier column.
+    var_date : str, default="note_time"
+        Report datetime column.
+    min_date : str or None, default="1990-01-01"
+        Optional minimum first-report date.
     n_group : int, default=10
-        Number of groups to split the test set into.
+        Number of test subsets.
     random_state : int, default=177
-        Random seed for reproducibility.
+        Random seed.
     size_test : float, default=0.5
-        Proportion of patients to include in the test set.
-    verbose : bool, default=False
-        Whether to print detailed information about the split.
+        Proportion of patients allocated to the test set.
+    verbose : bool, default=True
+        Whether to print dataset statistics.
 
     Returns
     -------
-    tuple
-        - df_train_new : pd.DataFrame
-            The unbalanced training set.
-        - test_groups : list of pd.DataFrame
-            List of test sets split into `n_group` subsets.
+    df_train : pd.DataFrame
+        Training dataframe.
+    test_groups : list
+        List of test dataframes.
     """
+
     df = df_OG.copy()
 
-    # Shuffle within each patient group
-    df = df.groupby(var_id, group_keys=False).apply(
-        lambda x: x.sample(frac=1, random_state=random_state)
-    ).reset_index(drop=True)
-
-    # Filter patients with all dates before min_date
-    min_date = pd.to_datetime(min_date)
-    df = df[df.groupby(var_id)[var_date].transform('min') > min_date]
-
-    # Unique patient IDs
-    unique_ids = df[var_id].unique()
-
-    # Train/test split
-    train_ids, test_ids = train_test_split(
-        unique_ids, test_size=size_test, random_state=random_state
-    )
-
-    df_train_new = df[df[var_id].isin(train_ids)]
-    df_test_combined = df[df[var_id].isin(test_ids)]
-
-    # Split test set into n groups
-    test_ids_splits = np.array_split(test_ids, n_group)
-    test_groups = [
-        df_test_combined[df_test_combined[var_id].isin(split)]
-        for split in test_ids_splits
-    ]
+    if var_date in df.columns:
+        df[var_date] = pd.to_datetime(df[var_date],errors="coerce")
 
     if verbose:
-        print(f"Number of unique patients in training set: {df_train_new[var_id].nunique()}")
-        for i, group in enumerate(test_groups, start=1):
-            print(f"Number of unique patients in test group {i}: {group[var_id].nunique()}")
+        print(f"Initial rows: {len(df)}\nInitial patients: {df[var_id].nunique()}")
 
-    return df_train_new, test_groups
+    # Optional date filtering
+    if min_date is not None:
+        min_date = pd.to_datetime(min_date)
+        first_dates = df.groupby(var_id)[var_date].transform("min")
+        df = df[first_dates >= min_date]
 
+        if verbose:
+            print(f"Patients after date filtering: {df[var_id].nunique()}")
+
+    # Unique patients indexes
+    unique_ids = df[var_id].unique()
+
+    if len(unique_ids) == 0:
+        raise ValueError(
+            "No patients remain after filtering. "
+            "Check `min_date` and the datetime column."
+        )
+
+    # Train/test split
+    train_ids, test_ids = train_test_split(unique_ids,test_size=size_test,random_state=random_state)
+
+    df_train = df[df[var_id].isin(train_ids)]
+    df_test = df[df[var_id].isin(test_ids)]
+
+
+    # Split test patients into groups
+    test_id_groups = np.array_split(test_ids,n_group)
+    test_groups = [df_test[df_test[var_id].isin(ids)] for ids in test_id_groups]
+    
+    # Verbose summary
+    if verbose:
+        print(f"Training patients: {df_train[var_id].nunique()}")
+        for i, group in enumerate(test_groups,start=1):
+            print(f"Test group {i}: {group[var_id].nunique()} patients")
+
+    return df_train, test_groups
 
     
 
-def make_df_conform(
+def make_df_conform0(
     df: pd.DataFrame,
     var_id: str = 'ID',
     var_start: str = 'date_start',
     var_end: str = 'date_end',
     var_death: str = 'DEATH',
     var_death_date: str = 'date_death',
-    var_T: str = 'T_days',
+    var_T: str = 'Ti',
     var_known: Optional[str] = None,     # e.g. 'duration_known'
     var_gap: str = 'death_know_gap',
     limite_gap: Optional[int] = None,    # ← FIXED here
@@ -518,11 +706,138 @@ def make_df_conform(
 
 
 
+
+def make_df_conform(
+    df,
+    var_id="SUBJECT_ID",
+    var_time="note_time",
+    var_death="delta_i",
+    var_T="Ti",
+    var_death_time="death_time",
+    verbose=True
+):
+    """
+    Prepare a longitudinal dataset for survival analysis.
+
+    The function:
+    - ensures datetime consistency,
+    - constructs a one-row-per-patient dataframe using the last report,
+    - removes invalid patients,
+    - filters the longitudinal dataframe accordingly.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Longitudinal dataframe.
+    var_id : str, default="SUBJECT_ID"
+        Patient identifier column.
+    var_time : str, default="note_time"
+        Report timestamp column.
+    var_death : str, default="delta_i"
+        Event indicator column.
+    var_T : str, default="Ti"
+        Survival duration column.
+    var_death_time : str, default="death_time"
+        Death timestamp column.
+    verbose : bool, default=True
+        Whether to print filtering statistics.
+
+    Returns
+    -------
+    df : pd.DataFrame
+        Filtered longitudinal dataframe.
+    df_last_obs : pd.DataFrame
+        One-row-per-patient dataframe.
+    id_list : np.ndarray
+        Retained patient identifiers.
+    """
+
+    df = df.copy()
+
+    if var_time in df.columns:
+        df[var_time] = pd.to_datetime(
+            df[var_time],
+            errors="coerce"
+        )
+
+    if var_death_time in df.columns:
+        df[var_death_time] = pd.to_datetime(
+            df[var_death_time],
+            errors="coerce"
+        )
+
+    keep_cols = [
+        c for c in [
+            var_id,
+            var_time,
+            var_death,
+            var_T,
+            var_death_time
+        ]
+        if c in df.columns
+    ]
+
+    df_last_obs = (
+        df.sort_values(var_time)
+          .groupby(var_id, as_index=False)
+          .last()[keep_cols]
+          .copy()
+    )
+
+    df_last_obs = (
+        df_last_obs
+        .dropna(subset=[var_T])
+        .loc[df_last_obs[var_T] > 0]
+        .reset_index(drop=True)
+    )
+
+    id_list = df_last_obs[var_id].values
+
+    initial_rows = len(df)
+    initial_patients = df[var_id].nunique()
+
+    df = df[
+        df[var_id].isin(id_list)
+    ].copy()
+
+    final_rows = len(df)
+    final_patients = df[var_id].nunique()
+
+    if verbose:
+
+        print(
+            f"Removed rows: "
+            f"{initial_rows - final_rows}"
+        )
+
+        print(
+            f"Removed patient IDs: "
+            f"{initial_patients - final_patients}"
+        )
+
+        kept_prop = (
+            final_patients / initial_patients
+            if initial_patients > 0
+            else 0.0
+        )
+
+        print(
+            f"Kept patient IDs: "
+            f"{final_patients}/{initial_patients} "
+            f"({kept_prop:.1%})"
+        )
+
+    return df, df_last_obs, id_list
+
+
+
+
 def global_sigbert_mimic_pipeline(
     df_full,
     df_train,
     test_sets,
     projection_matrix,
+    mean_embedding,
     lambda_l1=0.7,
     signature_order=2,
     use_levy_area=False,
@@ -532,6 +847,7 @@ def global_sigbert_mimic_pipeline(
     timestamp_col="note_time",
     event_col="delta_i",
     duration_col="survival_time",
+    var_T = 'Ti',
     cox_model_type="sk_cox",
     use_standard_scaling=False
 ):
@@ -593,7 +909,7 @@ def global_sigbert_mimic_pipeline(
         make_df_conform(
             df_train,
             var_id=patient_id_col,
-            var_T=duration_col,
+            var_T=var_T,
             verbose=False
         )
     )
@@ -620,7 +936,7 @@ def global_sigbert_mimic_pipeline(
             make_df_conform(
                 df_test,
                 var_id=patient_id_col,
-                var_T=duration_col,
+                var_T=var_T,
                 verbose=False
             )
         )
@@ -681,12 +997,15 @@ def global_sigbert_mimic_pipeline(
         ][patient_id_col].nunique()
     )
 
+
     # --------------------------------------------------
     # Study duration statistics
     # --------------------------------------------------
     df_all_last_obs = pd.concat(
         [df_train_last_obs, df_test_last_obs_all]
     )
+
+    df_all_last_obs=df_all_last_obs.rename(columns={"Ti": "survival_time"})
 
     mean_study_time = np.mean(
         df_all_last_obs[duration_col]
@@ -699,21 +1018,19 @@ def global_sigbert_mimic_pipeline(
     # --------------------------------------------------
     # Embedding projection
     # --------------------------------------------------
-    df_train_projected = apply_linear_projection(
-        df_train_processed,
-        projection_matrix,
-        var_embd=embedding_col
+    df_train_proj = apply_linear_projection(
+        df_train,
+        projection_matrix=projection_matrix,
+        mean_embedding=mean_embedding
     )
 
     # --------------------------------------------------
     # Signature extraction
     # --------------------------------------------------
-    Xt_train, y_train, feature_names, nbr_sig, nbr_levy, train_ids, df_study_train = (
+    Xt_train, y_train, feature_names, nbr_sig, train_ids, df_study_train = (
         prep_import(
-            df_train_projected,
-            t_pred=None,
-            order_sign=signature_order,
-            use_mat_Levy=use_levy_area,
+            df_train_proj,
+            signature_order=signature_order,
             print_progress=print_progress
         )
     )
@@ -724,12 +1041,8 @@ def global_sigbert_mimic_pipeline(
     scaler = None
 
     if use_standard_scaling:
-
         scaler = StandardScaler()
-
-        Xt_train = scaler.fit_transform(
-            Xt_train
-        )
+        Xt_train = scaler.fit_transform(Xt_train)
 
     # --------------------------------------------------
     # Cox model training
@@ -755,19 +1068,16 @@ def global_sigbert_mimic_pipeline(
     survival_test_outputs = []
 
     for i, df_test_processed in enumerate(processed_test_sets, start=1):
-
-        df_test_projected = apply_linear_projection(
-            df_test_processed,
-            projection_matrix,
-            var_embd=embedding_col
+        df_test_proj = apply_linear_projection(
+            df_test,
+            projection_matrix=projection_matrix,
+            mean_embedding=mean_embedding
         )
 
-        Xt_test, y_test, _, _, _, test_ids, df_study_test = (
+        Xt_test, y_test, _, _, test_ids, df_study_test = (
             prep_import(
-                df_test_projected,
-                t_pred=None,
-                order_sign=signature_order,
-                use_mat_Levy=use_levy_area,
+                df_test_proj,
+                signature_order=signature_order,
                 print_progress=print_progress
             )
         )
@@ -784,7 +1094,7 @@ def global_sigbert_mimic_pipeline(
                 w_cox,
                 cph,
                 test_ids,
-                plot_curves=False
+                print_all=False
             )
         )
 
@@ -868,7 +1178,7 @@ def compute_survival_time(df: pd.DataFrame,
                           new_var_time: str = 'T_days',
                           verbose: bool = True):
     """
-    Compute survival time T_i = (date_death - date_start) if death occurred,
+    Compute survival time Ti = (date_death - date_start) if death occurred,
     else (date_end - date_start). The result is added to df for each patient's
     observations and also returned as a patient-level summary.
     """
@@ -876,7 +1186,7 @@ def compute_survival_time(df: pd.DataFrame,
     for col in [var_start, var_end, var_death_date]:
         df[col] = pd.to_datetime(df[col], errors='coerce')
 
-    # Compute T_i for each patient (one row per ID)
+    # Compute Ti for each patient (one row per ID)
     df_surv = (
         df.sort_values(by=var_end)
           .groupby(var_id, as_index=False)
@@ -908,11 +1218,11 @@ def compute_survival_time(df: pd.DataFrame,
 
 def define_landmark_cohort(df: pd.DataFrame,
                            landmark_months: int,
-                           var_time: str = 'date_creation',
-                           var_id: str = 'ID',
-                           var_start: str = 'date_start',
-                           var_end: str = 'date_end',
-                           var_T: str = 'T_days',
+                           var_time: str = 'note_time',
+                           var_id: str = 'SUBJECT_ID',
+                           var_T: str = 'survival_time',
+                           var_since_start: str = 'time_since_first_note',
+                           var_death :str = 'delta_i',
                            window_months: int = 6,
                            verbose: bool = True):
     """
@@ -925,7 +1235,7 @@ def define_landmark_cohort(df: pd.DataFrame,
     """
 
     # Ensure datetime types
-    for col in [var_time, var_start, var_end]:
+    for col in [var_time]:
         df[col] = pd.to_datetime(df[col], errors='coerce')
 
     # Convert months to days
@@ -938,13 +1248,10 @@ def define_landmark_cohort(df: pd.DataFrame,
     # Subset: keep only patients at risk
     df_sub = df[df[var_id].isin(patients_in_study)].copy()
 
-    # Compute days since start
-    df_sub['days_since_start'] = (df_sub[var_time] - df_sub[var_start]).dt.days
-
     # Apply time window [L-w, L]
     total_obs_before = len(df_sub)
-    df_L = df_sub[(df_sub['days_since_start'] >= (L_days - w_days)) &
-                  (df_sub['days_since_start'] <= L_days)].copy()
+    df_L = df_sub[(df_sub[var_since_start] >= (L_days - w_days)) &
+                  (df_sub[var_since_start] <= L_days)].copy()
     total_obs_after = len(df_L)
     obs_removed = total_obs_before - total_obs_after
     prop_removed = obs_removed / total_obs_before if total_obs_before > 0 else 0
@@ -953,10 +1260,10 @@ def define_landmark_cohort(df: pd.DataFrame,
     # Compute gamma_i(L), but DO NOT MERGE into sequential dataframe
     # ---------------------------------------------------------------
     first_obs = (
-        df_L.groupby(var_id)['days_since_start']
+        df_L.groupby(var_id)[var_since_start]
         .min()
         .reset_index()
-        .rename(columns={'days_since_start': 'first_obs_days'})
+        .rename(columns={var_since_start: 'first_obs_days'})
     )
     first_obs['gamma'] = ((L_days - first_obs['first_obs_days']) < w_days).astype(int)
 
@@ -976,7 +1283,7 @@ def define_landmark_cohort(df: pd.DataFrame,
     # ====================================================================
     df_L["DEATH_L"] = (
         (df_L[var_T] > L_days) &
-        (df_L["DEATH"] == 1)
+        (df_L[var_death] == 1)
     ).astype(int)
     # ====================================================================
 
@@ -1000,6 +1307,8 @@ def define_landmark_cohort(df: pd.DataFrame,
 
 
 
+
+
 # UPDATE 2026
 
 
@@ -1009,7 +1318,6 @@ def prep_signature_cox(
     df_OG,
     order_sign=2,
     use_log=False,
-    use_mat_Levy=False,
     print_progress=False,
     var_id="ID",
     var_embd="embeddings",
@@ -1047,8 +1355,6 @@ def prep_signature_cox(
         df_time,
         order=order_sign,
         var_embd=var_embd,
-        use_log=use_log,
-        use_mat_Levy=use_mat_Levy,
         interpolation_type=interpolation_type,
         var_struct_list=var_struct_seq_list_OG,
         verbose=verbose
@@ -1096,3 +1402,59 @@ def prep_signature_cox(
         print(f"Final dataset shape: {df_study.shape}")
 
     return Xt, y, features_name, nbr_sig, nbr_levy, id_list, df_study
+
+
+
+def jackknife_confidence_interval(scores, alpha=0.05):
+    """
+    Compute a confidence interval using the Jackknife resampling method.
+
+    The Jackknife method estimates the variance of a statistic (e.g., C-index)
+    by systematically leaving out one observation at a time. This function
+    provides a bias-corrected point estimate and computes the corresponding
+    confidence interval under normal approximation.
+
+    Parameters
+    ----------
+    scores : list or np.ndarray
+        List of evaluation scores (e.g., C-index values from multiple test folds).
+    alpha : float, default=0.05
+        Significance level for the confidence interval (e.g., 0.05 for 95% CI).
+
+    Returns
+    -------
+    tuple
+        (lower_bound, upper_bound) of the estimated confidence interval.
+
+    Notes
+    -----
+    - The normal quantile is fixed to z = 1.96 for 95% CI (useful for small sample size).
+    - The result includes a bias correction using the Jackknife estimate.
+    - Assumes the score distribution is approximately symmetric.
+    """
+    n = len(scores)
+    scores = np.array(scores)
+
+    # Compute the full-sample mean
+    mean_score = np.mean(scores)
+
+    # Compute leave-one-out means
+    jackknife_means = np.array([
+        (np.sum(scores) - scores[i]) / (n - 1)
+        for i in range(n)
+    ])
+
+    # Bias correction
+    jackknife_mean = np.mean(jackknife_means)
+    bias_corrected_mean = n * mean_score - (n - 1) * jackknife_mean
+
+    # Jackknife variance and standard deviation
+    jackknife_var = (n - 1) / n * np.sum((jackknife_means - jackknife_mean) ** 2)
+    jackknife_std = np.sqrt(jackknife_var)
+
+    # Confidence interval using normal approximation
+    z = 1.96  # For 95% CI
+    lower_bound = bias_corrected_mean - z * jackknife_std
+    upper_bound = bias_corrected_mean + z * jackknife_std
+
+    return lower_bound, upper_bound
